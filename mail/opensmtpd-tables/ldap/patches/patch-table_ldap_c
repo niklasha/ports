@@ -1,0 +1,13 @@
+Index: table_ldap.c
+--- table_ldap.c.orig
++++ table_ldap.c
+@@ -476,7 +476,8 @@ ldap_run_query(int type, const char *key, char *dst, s
+ 			ret = -1;
+ 		break;
+ 	case K_CREDENTIALS:
+-		if (snprintf(dst, sz, "%s:%s", res[0][0], res[1][0]) >= (int)sz)
++		if (strncmp(res[1][0], "{CRYPT}", 7) ||
++		    snprintf(dst, sz, "%s:%s", res[0][0], res[1][0] + 7) >= (int)sz)
+ 			ret = -1;
+ 		break;
+ 	case K_USERINFO:
