@@ -1,14 +1,20 @@
-In order to update /etc/services and /etc/inetd.conf, run
+In order to update /etc/services and /etc/inetd.conf, run:
 
+   test -f /etc/inetd.conf || touch /etc/inetd.conf
    ${PREFIX}/libexec/amanda/patch-system --disable-index --disable-tape
 
 inetd(8) must be reloaded (or started). To enable it at boot, the
-following line needs to be added to rc.conf.local(5):
-inetd_flags=
+following command needs to be run:
 
-You should check both of these files, verifying proper installation.
+   rcctl enable inetd
 
-You also need to create /operator/.amandahosts, which will contain the
+You should check both of the mentioned files, verifying proper installation.
+
+You also need to create operator's home directory:
+
+   mkdir /operator && chown operator:operator /operator
+
+Then create /operator/.amandahosts, which will contain the
 FQDN of the tape server and the user allowed to access this machine.
 The contents should look like this:
 
