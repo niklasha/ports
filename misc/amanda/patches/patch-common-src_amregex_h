@@ -1,0 +1,14 @@
+$OpenBSD$
+
+Index: common-src/amregex.h
+--- common-src/amregex.h.orig
++++ common-src/amregex.h
+@@ -72,7 +72,7 @@
+  * for printf-like functions).  Only do this in gcc 2.7 or later ...
+  * it may work on earlier stuff, but why chance it.
+  */
+-#if !defined(__GNUC__) || __GNUC__ < 2 || __GNUC_MINOR__ < 7
++#if !defined(__GNUC__) || __GNUC__ < 2 || (__GNUC__ == 2 && __GNUC_MINOR__ < 7)
+ #define __attribute__(__x)
+ #endif
+ 
