@@ -26,7 +26,7 @@ CATEGORIES=	misc
 
 HOMEPAGE=	http://www.amanda.org/
 
-MAINTAINER=	Olivier Cherrier <oc@symacx.com>
+MAINTAINER=	Niklas Hallqvist <niklas@appli.se>
 
 # BSD
 PERMIT_PACKAGE=	Yes
