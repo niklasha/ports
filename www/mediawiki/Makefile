@@ -2,13 +2,13 @@
 
 COMMENT =	web-based collaborative editing environment
 
-V =		1.35.1
+V =		1.37.2
 DISTNAME =	mediawiki-${V}
 CATEGORIES =	www
 
 HOMEPAGE =	http://www.mediawiki.org/
 
-MAINTAINER =	Wen Heping <wenheping@gmail.com>
+MAINTAINER =	Niklas Hallqvist <niklas@appli.se>
 
 # GPLv2+
 PERMIT_PACKAGE = Yes
@@ -25,7 +25,7 @@ SUBST_VARS=	INSTDIR
 
 MODULES=	lang/php
 RUN_DEPENDS=	lang/php/${MODPHP_VERSION},-gd \
-		php-mysqli-${MODPHP_VSPEC}|php-pgsql-${MODPHP_VSPEC}:lang/php/${MODPHP_VERSION},-mysqli
+		php-mysqli-${MODPHP_VSPEC}|php-pgsql-${MODPHP_VSPEC}|php-sqlite3-${MODPHP_VSPEC}:lang/php/${MODPHP_VERSION},-mysqli
 
 do-install:
 	@${INSTALL_DATA_DIR} ${INSTDIR}
