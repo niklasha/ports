@@ -1,11 +1,9 @@
-$OpenBSD$
-
 Don't require Content-Length on presigned requests.
 
 Index: cmd/object-handlers.go
 --- cmd/object-handlers.go.orig
 +++ cmd/object-handlers.go
-@@ -1574,25 +1574,27 @@ func (api objectAPIHandlers) PutObjectHandler(w http.R
+@@ -1613,25 +1613,27 @@ func (api objectAPIHandlers) PutObjectHandler(w http.R
  		return
  	}
  

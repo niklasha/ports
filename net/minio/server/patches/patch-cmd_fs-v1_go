@@ -1,5 +1,3 @@
-$OpenBSD$
-
 Shard object metadata directories in order to not trip on UFS-derived
 filesystems' 32K links restriction.
 
@@ -15,7 +13,7 @@ Index: cmd/fs-v1.go
  	"fmt"
  	"io"
  	"io/ioutil"
-@@ -89,6 +91,12 @@ type fsAppendFile struct {
+@@ -88,6 +90,12 @@ type fsAppendFile struct {
  	filePath string     // Absolute path of the file in the temp location.
  }
  
@@ -28,17 +26,17 @@ Index: cmd/fs-v1.go
  // Initializes meta volume on all the fs path.
  func initMetaVolumeFS(fsPath, fsUUID string) error {
  	// This happens for the first time, but keep this here since this
-@@ -355,7 +363,8 @@ func (fs *FSObjects) scanBucket(ctx context.Context, b
- 	// Load bucket info.
- 	cache, err = scanDataFolder(ctx, fs.fsPath, cache, func(item scannerItem) (sizeSummary, error) {
- 		bucket, object := item.bucket, item.objectPath()
+@@ -379,7 +387,8 @@ func (fs *FSObjects) scanBucket(ctx context.Context, b
+ 				done(len(fsMetaBytes))
+ 			}
+ 		}()
 -		fsMetaBytes, err := xioutil.ReadFile(pathJoin(fs.fsPath, minioMetaBucket, bucketMetaPrefix, bucket, object, fs.metaJSONFile))
 +		sha := sha(object)
 +		fsMetaBytes, err := xioutil.ReadFile(pathJoin(fs.fsPath, minioMetaBucket, bucketMetaPrefix, bucket, sha[:3], sha[3:6], object, fs.metaJSONFile))
  		if err != nil && !osIsNotExist(err) {
  			if intDataUpdateTracker.debug {
  				logger.Info(color.Green("scanBucket:")+" object return unexpected error: %v/%v: %w", item.bucket, item.objectPath(), err)
-@@ -743,7 +752,8 @@ func (fs *FSObjects) GetObjectNInfo(ctx context.Contex
+@@ -772,7 +781,8 @@ func (fs *FSObjects) GetObjectNInfo(ctx context.Contex
  	// Take a rwPool lock for NFS gateway type deployment
  	rwPoolUnlocker := func() {}
  	if bucket != minioMetaBucket && lockType != noLock {
@@ -48,7 +46,7 @@ Index: cmd/fs-v1.go
  		_, err = fs.rwPool.Open(fsMetaPath)
  		if err != nil && err != errFileNotFound {
  			logger.LogIf(ctx, err)
-@@ -834,7 +844,8 @@ func (fs *FSObjects) getObjectInfoNoFSLock(ctx context
+@@ -863,7 +873,8 @@ func (fs *FSObjects) getObjectInfoNoFSLock(ctx context
  		return fsMeta.ToObjectInfo(bucket, object, fi), nil
  	}
  
@@ -58,7 +56,7 @@ Index: cmd/fs-v1.go
  	// Read `fs.json` to perhaps contend with
  	// parallel Put() operations.
  
-@@ -889,7 +900,8 @@ func (fs *FSObjects) getObjectInfo(ctx context.Context
+@@ -918,7 +929,8 @@ func (fs *FSObjects) getObjectInfo(ctx context.Context
  		return fsMeta.ToObjectInfo(bucket, object, fi), nil
  	}
  
@@ -68,7 +66,7 @@ Index: cmd/fs-v1.go
  	// Read `fs.json` to perhaps contend with
  	// parallel Put() operations.
  
-@@ -968,7 +980,8 @@ func (fs *FSObjects) GetObjectInfo(ctx context.Context
+@@ -997,7 +1009,8 @@ func (fs *FSObjects) GetObjectInfo(ctx context.Context
  			return oi, toObjectErr(err, bucket, object)
  		}
  
@@ -78,7 +76,7 @@ Index: cmd/fs-v1.go
  		err = fs.createFsJSON(object, fsMetaPath)
  		lk.Unlock(lkctx.Cancel)
  		if err != nil {
-@@ -1049,7 +1062,8 @@ func (fs *FSObjects) putObject(ctx context.Context, bu
+@@ -1078,7 +1091,8 @@ func (fs *FSObjects) putObject(ctx context.Context, bu
  	var wlk *lock.LockedFile
  	if bucket != minioMetaBucket {
  		bucketMetaDir := pathJoin(fs.fsPath, minioMetaBucket, bucketMetaPrefix)
@@ -88,7 +86,7 @@ Index: cmd/fs-v1.go
  		wlk, err = fs.rwPool.Write(fsMetaPath)
  		var freshFile bool
  		if err != nil {
-@@ -1180,7 +1194,8 @@ func (fs *FSObjects) DeleteObject(ctx context.Context,
+@@ -1209,7 +1223,8 @@ func (fs *FSObjects) DeleteObject(ctx context.Context,
  	var rwlk *lock.LockedFile
  
  	minioMetaBucketDir := pathJoin(fs.fsPath, minioMetaBucket)
@@ -98,7 +96,7 @@ Index: cmd/fs-v1.go
  	if bucket != minioMetaBucket {
  		rwlk, err = fs.rwPool.Write(fsMetaPath)
  		if err != nil && err != errFileNotFound {
-@@ -1293,7 +1308,8 @@ func (fs *FSObjects) PutObjectTags(ctx context.Context
+@@ -1336,7 +1351,8 @@ func (fs *FSObjects) PutObjectTags(ctx context.Context
  		}
  	}
  
