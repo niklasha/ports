@@ -13,7 +13,7 @@ on the local machine; these should work as-is.
 
 You may check your configuration file format before starting Nagios:
 
-   # su -m _nagios -c "${TRUEPREFIX}/sbin/nagios -v ${SYSCONFDIR}/nagios/nagios.cfg"
+   # su -m _nagios -c "${TRUEPREFIX}/bin/nagios -v ${SYSCONFDIR}/nagios/nagios.cfg"
 
 This will parse all configuration files and warn about any problems
 which have been identified.
