@@ -2,7 +2,7 @@
 
 COMMENT =	web-based collaborative editing environment
 
-V =		1.37.2
+V =		1.40.1
 DISTNAME =	mediawiki-${V}
 CATEGORIES =	www
 
@@ -13,7 +13,7 @@ MAINTAINER =	Niklas Hallqvist <niklas@appli.se>
 # GPLv2+
 PERMIT_PACKAGE = Yes
 
-MASTER_SITES=	http://download.wikimedia.org/mediawiki/${V:R}/
+SITES=	https://releases.wikimedia.org/mediawiki/${V:R}/
 
 NO_BUILD=	Yes
 NO_TEST=	Yes
