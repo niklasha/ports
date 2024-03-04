@@ -2,7 +2,7 @@
 
 COMMENT =	web-based collaborative editing environment
 
-V =		1.40.1
+V =		1.41.0
 DISTNAME =	mediawiki-${V}
 CATEGORIES =	www
 
@@ -25,6 +25,7 @@ SUBST_VARS=	INSTDIR
 
 MODULES=	lang/php
 RUN_DEPENDS=	lang/php/${MODPHP_VERSION},-gd \
+		lang/php/${MODPHP_VERSION},-intl \
 		php-mysqli-${MODPHP_VSPEC}|php-pgsql-${MODPHP_VSPEC}|php-sqlite3-${MODPHP_VSPEC}:lang/php/${MODPHP_VERSION},-mysqli
 
 do-install:
