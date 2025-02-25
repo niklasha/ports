@@ -8,7 +8,6 @@ MODGO_MODNAME =	github.com/minio/minio
 MODGO_VERSION =	v0.0.0-${V:C/[-TZ]//g}-${SHORTCID}
 
 DISTNAME =	minio-${MODGO_VERSION}
-WRKDIST =	${WRKDIR}/${MODGO_MODNAME}@${MODGO_VERSION}
 PKGNAME =	minio-0.${V:C/T.*//:S/-//g}
 
 MODGO_LDFLAGS =	-s -w \
