@@ -6,7 +6,7 @@ MOZILLA_BRANCH =	release
 MOZILLA_PROJECT =	firefox-esr
 MOZILLA_CODENAME =	browser
 MOZILLA_DIST =		firefox
-MOZILLA_PROFDATA_TASKID = TL1QPUybRKCnrets6KUgAQ
+MOZILLA_PROFDATA_TASKID = ArQtewurQOGjSdib3C0pDA
 
 WRKDIST =	${WRKDIR}/${MOZILLA_DIST}-${MOZILLA_DIST_VERSION:C/esr//}
 HOMEPAGE =	https://www.mozilla.org/firefox/organizations/
