@@ -1,5 +1,6 @@
 COMMENT=		libraries to support development of security-enabled apps
 
+REVISION=		0
 VERSION=		3.130
 # from https://hg.mozilla.org/projects/nss/file/tip/automation/release/nspr-version.txt
 NSPR_VERSION=		4.39
