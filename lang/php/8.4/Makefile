@@ -1,10 +1,12 @@
 PHP_VERSION=	8.4.26
+REVISION-main=	0
 
 AUTOCONF_VERSION= 2.73
 
 PHP_PKGSPEC=	>=8.4,<8.5
 ZEND_EXTENSIONS= -opcache
-CONFIGURE_ARGS=	--enable-opcache
+CONFIGURE_ARGS=	--enable-opcache \
+		--with-pic
 
 WANTLIB-pdo_odbc += iodbcinst
 
