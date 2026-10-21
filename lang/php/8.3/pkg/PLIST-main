@@ -15,10 +15,14 @@
 @group
 @sample ${SYSCONFDIR}/php-fpm.d/
 @rcscript ${RCDIR}/php${SV}_fpm
+bin/phar
 bin/phar-${PV}
 bin/phar-${PV}.phar
+bin/php
 @bin bin/php-${PV}
+bin/php-config
 bin/php-config-${PV}
+bin/phpize
 bin/phpize-${PV}
 @comment lib/apache2/
 lib/php-${PV}/
