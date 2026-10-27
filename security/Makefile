@@ -80,6 +80,7 @@
      SUBDIR += integrit
      SUBDIR += ipguard
      SUBDIR += isic
+     SUBDIR += jdk-ca-certs
      SUBDIR += john
      SUBDIR += john-jumbo
      SUBDIR += kc
