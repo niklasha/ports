@@ -12,7 +12,7 @@ DPB_PROPERTIES+=	lonesome
 
 COMMENT=		Chromium browser
 
-V=			154.0.8037.92
+V=			156.0.8078.73
 
 DISTNAME=		chromium-${V}
 
@@ -20,19 +20,15 @@ DISTFILES+=		${CHROMIUM_DISTFILES} \
 			${REGRESS_DISTFILES}
 DISTFILES.a=		${REGRESS_DISTFILES.a} \
 			${PROFILE_DISTFILES.a} \
-			${CHROMIUM_DISTFILES.a} \
 			${VENDOR_DISTFILES.a}
-DISTFILES.b=		${CHROMIUM_DISTFILES.b}
 
-#CHROMIUM_DISTFILES+=	chromium-${V}-lite${EXTRACT_SUFX}
-CHROMIUM_DISTFILES.b=	chromium-${V}-linux${EXTRACT_SUFX}
-#REGRESS_DISTFILES+=	chromium-${V}-testdata${EXTRACT_SUFX}
+CHROMIUM_DISTFILES+=	chromium-${V}-lite${EXTRACT_SUFX}
+REGRESS_DISTFILES+=	chromium-${V}-testdata${EXTRACT_SUFX}
 PROFILE_DISTFILES.a=	chromium-${V}-profdata${EXTRACT_SUFX}
 REGRESS_DISTFILES.a=	test_fonts-a28b222b79851716f8358d2800157d9ffe117b3545031ae51f69b7e1e1b9a969.tar.gz
 
 TS_VERSION=		7.0.2
 
-DIST_TUPLE+=		github rollup rollup v4.60.4 rollup
 DIST_TUPLE+=		github microsoft TypeScript v${TS_VERSION} typescript
 
 # ftp https://github.com/microsoft/TypeScript/archive/refs/tags/v${TS_VERSION}.tar.gz
@@ -60,15 +56,8 @@ PERMIT_PACKAGE =	Yes
 
 SITES=		https://commondatastorage.googleapis.com/chromium-browser-official/
 SITES.a=	https://nerd.hu/distfiles/
-SITES.b=	https://github.com/chromium-linux-tarballs/chromium-tarballs/releases/download/${V}/
 
-MODULES=	devel/cargo lang/clang lang/python x11/qt5 x11/qt6
-
-MODCARGO_CARGOTOML=	${WRKSRC}/rollup/rust/Cargo.toml
-MODCARGO_TARGET_DIR=	${WRKSRC}/rollup/rust/target
-MODCARGO_BUILD=		No
-MODCARGO_INSTALL=	No
-MODCARGO_TEST=		No
+MODULES=	lang/clang lang/python x11/qt5 x11/qt6
 
 MODCLANG_VERSION=	22
 MODQT5_DEPS=		No
@@ -101,13 +90,13 @@ BUILD_DEPENDS=	archivers/bzip2 \
 		devel/esbuild \
 		devel/esbuild:patch \
 		devel/gperf \
+		devel/llvm/${MODCLANG_VERSION},-python \
 		devel/rust-bindgen \
 		graphics/vulkan-headers \
 		lang/go \
 		lang/rust,-rustfmt \
 		lang/node \
 		lang/rust \
-		lang/typescript \
 		shells/bash \
 		sysutils/flock \
 		sysutils/pciutils \
@@ -115,7 +104,7 @@ BUILD_DEPENDS=	archivers/bzip2 \
 		x11/py-xcbgen \
 		${MODQT5_LIB_DEPENDS} \
 		${MODQT6_LIB_DEPENDS} \
-		${MODGCC4_CPPDEP} \
+		${MODGCC_CPPDEP} \
 		${RUN_DEPENDS}
 LIB_DEPENDS=	audio/opus \
 		devel/pango \
@@ -128,7 +117,7 @@ LIB_DEPENDS=	audio/opus \
 		x11/gnome/at-spi2-core \
 		x11/xkbcommon \
 		print/cups,-libs \
-		${MODGCC4_CPPLIBDEP}
+		${MODGCC_CPPLIBDEP}
 
 USE_GMAKE=	Yes
 
@@ -211,6 +200,8 @@ GN_ARGS=	is_official_build=true \
 		use_custom_libunwind=true \
 		use_udev=true \
 		v8_enable_cet_ibt=true \
+		v8_metagen_libclang_so=\"${LOCALBASE}/llvm${MODCLANG_VERSION}/lib/libclang.so.0.0\" \
+		v8_metagen_libclang_bindings_dir=\"${LOCALBASE}/llvm${MODCLANG_VERSION}/lib/python${MODPY_VERSION}/site-packages\" \
 		use_qt5=true \
 		use_qt6=true \
 		moc_qt5_path=\"${MODQT5_MOC}\" \
@@ -314,6 +305,7 @@ post-patch:
 		${WRKSRC}/build/linux/strip_binary.gni \
 		${WRKSRC}/build/rust/rust_bindgen.gni \
 		${WRKSRC}/build/rust/rust_bindgen_generator.gni \
+		${WRKSRC}/v8/BUILD.gn \
 		${WRKSRC}/v8/tools/run.py \
 		${WRKSRC}/tools/protoc_wrapper/protoc_wrapper.py \
 		${WRKSRC}/third_party/blink/renderer/build/scripts/run_with_pythonpath.py
@@ -325,7 +317,6 @@ post-patch:
 # 2. bootstrap gn, the tool to generate ninja files
 # 3. run gn with the appropriate configuration arguments
 do-configure:
-	@${MODCARGO_configure}
 	(cd ${WRKDIR}/devel/esbuild/github.com/evanw/esbuild@*/ && \
 		${LOCALBASE}/bin/node scripts/esbuild.js \
 		/usr/local/bin/esbuild --neutral && \
@@ -348,6 +339,7 @@ do-configure:
 		--system-libraries ${GN_SYSTEM_LIBS}
 	@cd ${WRKSRC}/tools/gn && env -i ${MAKE_ENV} LDFLAGS=-L${LOCALBASE}/lib ${MODPY_BIN} bootstrap/bootstrap.py \
 		--no-clean -s --skip-generate-buildfiles
+	@ln -sf ${WRKSRC}/out/${BUILDTYPE}/gn ${WRKSRC}/buildtools/linux64/gn
 	@cd ${WRKSRC} && env -i ${CONFIGURE_ENV} ${WRKSRC}/out/${BUILDTYPE}/gn \
 		gen --args="${GN_ARGS}" out/${BUILDTYPE}
 
@@ -355,14 +347,7 @@ do-build:
 	cd ${WRKSRC}/typescript/tsc && \
 		${SETENV} ${MAKE_ENV} go build -v -p ${MAKE_JOBS} -mod=vendor ./cmd/tsgo && \
 		ln -sf ${WRKSRC}/typescript/tsc/tsgo \
-		${WRKSRC}/third_party/typescript/linux-amd64/src/lib/tsc 
-	@${MODCARGO_BUILD_TARGET}
-	(cd ${WRKSRC}/third_party/devtools-frontend/src/node_modules/@rollup && \
-		mkdir -p rollup-openbsd && \
-		cp ${MODCARGO_TARGET_DIR}/release/libbindings_napi.so \
-			rollup-openbsd/rollup.openbsd.node && \
-		echo '{ "main": "./rollup.openbsd.node" }' \
-			> rollup-openbsd/package.json)
+		${WRKSRC}/third_party/typescript/linux-amd64/src/lib/tsc
 	@cd ${WRKSRC} && env -i ${MAKE_ENV} ninja \
 		-j ${MAKE_JOBS} -C out/${BUILDTYPE} ${ALL_TARGET}
 
@@ -438,5 +423,4 @@ do-test:
 	@cd ${WRKSRC} && env -i ${MAKE_ENV} ninja \
 		-j ${MAKE_JOBS} -C out/${BUILDTYPE} ${TEST_TARGET}
 
-.include "crates.inc"
 .include <bsd.port.mk>
