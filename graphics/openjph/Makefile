@@ -4,6 +4,7 @@ GH_ACCOUNT=	aous72
 GH_PROJECT=	OpenJPH
 GH_TAGNAME=	0.32.0
 PKGNAME=	${DISTNAME:L}
+REVISION=	0
 
 SHARED_LIBS +=	openjph                   0.6 # 0.0
 

@@ -1,0 +1,36 @@
+From 345a8bcd1c7a3908e3870797057277660a412073 Mon Sep 17 00:00:00 2001
+From: Aous Naman <aous@unsw.edu.au>
+Date: Mon, 2 Nov 2026 08:57:19 +1100
+Subject: [PATCH] Fixes CVE-2026-111151
+
+Index: src/core/codestream/ojph_codeblock.cpp
+--- src/core/codestream/ojph_codeblock.cpp.orig
++++ src/core/codestream/ojph_codeblock.cpp
+@@ -61,11 +61,14 @@ namespace ojph {
+       assert(byte_alignment / sizeof(ui32) > 1);
+       const ui32 f = byte_alignment / sizeof(ui32) - 1;
+       ui32 stride = (nominal.w + f) & ~f; // a multiple of 8
++      // the HT cleanup pass writes two rows per quad row, so the sample
++      // buffer must hold an even number of rows
++      ui32 rows = (nominal.h + 1u) & ~1u;
+ 
+       if (precision <= 32)
+-        allocator->pre_alloc_data<ui32>(nominal.h * (size_t)stride, 0);
++        allocator->pre_alloc_data<ui32>(rows * (size_t)stride, 0);
+       else
+-        allocator->pre_alloc_data<ui64>(nominal.h * (size_t)stride, 0);
++        allocator->pre_alloc_data<ui64>(rows * (size_t)stride, 0);
+     }
+ 
+     //////////////////////////////////////////////////////////////////////////
+@@ -80,7 +83,9 @@ namespace ojph {
+ 
+       const ui32 f = byte_alignment / sizeof(ui32) - 1;
+       this->stride = (nominal.w + f) & ~f; // a multiple of 8
+-      this->buf_size = this->stride * nominal.h;
++      // the HT cleanup pass writes two rows per quad row, so the sample
++      // buffer must hold an even number of rows
++      this->buf_size = this->stride * ((nominal.h + 1u) & ~1u);
+ 
+       if (precision <= 32) {
+         this->precision = BUF32;
