@@ -1,0 +1,172 @@
+Index: backend/vilter-clamd/vilter-clamd.c
+--- backend/vilter-clamd/vilter-clamd.c.orig
++++ backend/vilter-clamd/vilter-clamd.c
+@@ -166,6 +166,23 @@ connect_local(void)
+ 	return fd;
+ }
+ 
++/*
++ * Send one INSTREAM chunk: a 4 byte length in network byte order
++ * followed by the data.  A zero length chunk terminates the stream.
++ */
++static int
++instream_chunk(int fd, char *data, size_t len, struct timeval *t)
++{
++	u_int32_t	hdr;
++
++	hdr = htonl((u_int32_t)len);
++	if (to_send(fd, (char *)&hdr, sizeof(hdr), 0, t) != sizeof(hdr))
++		return -1;
++	if (len > 0 && to_send(fd, data, len, 0, t) != len)
++		return -1;
++	return 0;
++}
++
+ int
+ vilter_scan(SMFICTX *ctx, char *fn, size_t fnlen, char *chroot, char *virus,
+     size_t namelen)
+@@ -174,11 +191,6 @@ vilter_scan(SMFICTX *ctx, char *fn, size_t fnlen, char
+ 	int			 nread;
+ 	FILE			*fp;
+ 	SOCK			*sp;
+-	unsigned short		 port;
+-	struct sockaddr_in	 bind_sockaddr, data_sockaddr;
+-	struct sockaddr_in	 server_sockaddr;
+-	struct hostent		*hostent;
+-	int			 try;
+ 	struct timeval		 tv, *t;
+ 	char			 buf[MAXBUF];
+ 	char			*p, *q;
+@@ -220,110 +232,45 @@ vilter_scan(SMFICTX *ctx, char *fn, size_t fnlen, char
+ 		}
+ 		break;
+ 	case SCANTYPE_SOCKET:
+-		if (to_send(fd, "STREAM\r\n", 8, 0, t) != 8) {
+-			syslog(LOG_ERR, "clamd: timeout");
+-			close(fd);
+-			return SCAN_ERROR;
+-		}
+-		if (to_readln(buf, sizeof(buf), sp, t) <= 0) {
+-			syslog(LOG_ERR, "clamd: no response to STREAM cmd");
+-			sclose(sp);
+-			return SCAN_ERROR;
+-		}
+-		if (sscanf(buf, "PORT %hu\n", &port) != 1) {
+-			syslog(LOG_ERR, "clamd: did not receive port number");
+-			sclose(sp);
+-			return SCAN_ERROR;
+-		}
+-		if ((datfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+-			syslog(LOG_ERR, "clamd: unable to obtain network");
+-			sclose(sp);
+-			return SCAN_ERROR;
+-		}
+-		if (bind_addr != NULL) {
+-			bzero((char *)&server_sockaddr,
+-			    sizeof(server_sockaddr));
+-			bind_sockaddr.sin_family = AF_INET;
+-
+-			if (inet_aton(bind_addr, &bind_sockaddr.sin_addr) ==
+-			    0) {
+-				hostent = gethostbyname(bind_addr);
+-				if (!hostent) {
+-					syslog(LOG_ERR, "clamd: unknown bind "
+-					    "address: %s", bind_addr);
+-					close(datfd);
+-					return SCAN_ERROR;
+-				}
+-
+-				bind_sockaddr.sin_family = hostent->h_addrtype;
+-				memcpy(&bind_sockaddr.sin_addr,
+-				    hostent->h_addr, hostent->h_length);
+-			}
+-			if (bind(datfd, (struct sockaddr *)&bind_sockaddr,
+-			    sizeof(bind_sockaddr))) {
+-				syslog(LOG_ERR, "clamd: can't bind to address "
+-				    "%s", bind_addr);
+-				close(datfd);
+-				return SCAN_ERROR;
+-			}
+-		}
+-		bzero((char *)&data_sockaddr, sizeof(data_sockaddr));
+-
+-		data_sockaddr.sin_family = AF_INET;
+-		data_sockaddr.sin_port = htons(port);
+-
+-		if (inet_aton(clamd_host, &data_sockaddr.sin_addr) == 0) {
+-			hostent = gethostbyname(clamd_host);
+-			if (!hostent) {
+-				syslog(LOG_ERR, "clamd: unknown host: %s",
+-				    clamd_host);
+-				close(datfd);
+-				close(fd);
+-				return SCAN_ERROR;
+-			}
+-			data_sockaddr.sin_family = hostent->h_addrtype;
+-			memcpy(&data_sockaddr.sin_addr, hostent->h_addr,
+-			    hostent->h_length);
+-		} 
+-		try = 0;
+-		while (connect(datfd, (struct sockaddr *)&data_sockaddr,
+-		    sizeof(data_sockaddr)) == -1) {
+-			++try;
+-			if (try == clamd_tries) {
+-				syslog(LOG_ERR, "clamd: unable to connect "
+-				    "socket");
+-				close(datfd);
+-				sclose(sp);
+-				return SCAN_ERROR;
+-			} else
+-				sleep(1);
+-		}
++		/*
++		 * Stream the file to clamd over the command connection with
++		 * INSTREAM.  The former STREAM command, which handed out a
++		 * separate data port, was deprecated in ClamAV 0.95 and is
++		 * no longer supported by current clamd.
++		 */
+ 		if ((fp = fopen(fn, "r")) == NULL) {
+ 			syslog(LOG_ERR, "clamd: error opening file '%s' for "
+ 			    "reading", fn);
+-			close(datfd);
+ 			sclose(sp);
+ 			return SCAN_ERROR;
+ 		}
+-		if (to_send(datfd, CLAMD_FROM, sizeof(CLAMD_FROM), 0, t) !=
+-		    sizeof(CLAMD_FROM)) {
++		if (to_send(fd, "nINSTREAM\n", 10, 0, t) != 10) {
++			syslog(LOG_ERR, "clamd: error sending INSTREAM");
++			sclose(sp);
++			fclose(fp);
++			return SCAN_ERROR;
++		}
++		if (instream_chunk(fd, CLAMD_FROM, strlen(CLAMD_FROM), t)
++		    == -1) {
+ 			syslog(LOG_ERR, "clamd: error sending From");
+-			close(datfd);
+ 			sclose(sp);
+ 			fclose(fp);
+-			return SCAN_ERROR;	
++			return SCAN_ERROR;
+ 		}
+ 		while ((nread = fread(buf, 1, sizeof(buf), fp)) > 0) {
+-			if (to_send(datfd, buf, nread, 0, t) != nread) {
++			if (instream_chunk(fd, buf, nread, t) == -1) {
+ 				syslog(LOG_ERR, "clamd: error sending file");
+-				close(datfd);
+ 				sclose(sp);
+ 				fclose(fp);
+ 				return SCAN_ERROR;
+ 			}
+ 		}
+-		fclose(fp);	
+-		close(datfd);
++		fclose(fp);
++		if (instream_chunk(fd, NULL, 0, t) == -1) {
++			syslog(LOG_ERR, "clamd: error terminating stream");
++			sclose(sp);
++			return SCAN_ERROR;
++		}
+ 		break;
+ 	case SCANTYPE_FILDES:
+ 		if ((datfd = open(fn, O_RDONLY)) == -1) {
