@@ -1,7 +1,92 @@
 Index: table_ldap.c
 --- table_ldap.c.orig
 +++ table_ldap.c
-@@ -476,7 +476,8 @@ ldap_run_query(int type, const char *key, char *dst, s
+@@ -24,6 +24,7 @@
+ #include <netdb.h>
+ 
+ #include <ctype.h>
++#include <signal.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <string.h>
+@@ -279,6 +280,7 @@ ldap_open(void)
+ 
+ 	if (aldap) {
+ 		aldap_close(aldap);
++		aldap = NULL;
+ 		log_info("info: table-ldap: closed previous connection");
+ 	}
+ 
+@@ -316,18 +318,40 @@ ldap_open(void)
+ 	return 1;
+ 
+ err:
+-	if (aldap)
++	if (aldap) {
+ 		aldap_close(aldap);
++		aldap = NULL;
++	}
+ 	if (amsg)
+ 		aldap_freemsg(amsg);
+ 	return 0;
+ }
+ 
++/*
++ * Run a query, reconnecting once if the connection is gone or the
++ * query fails.  A failed reconnect leaves aldap NULL, so never touch
++ * the connection before checking it: the next request will simply try
++ * to reconnect again instead of crashing.
++ */
+ static int
+-table_ldap_lookup(int service, struct dict *params, const char *key, char *dst, size_t sz)
++ldap_run_query_reconnect(int type, const char *key, char *dst, size_t sz)
+ {
+ 	int ret;
+ 
++	if (aldap != NULL &&
++	    (ret = ldap_run_query(type, key, dst, sz)) >= 0)
++		return ret;
++	log_debug("debug: table-ldap: reconnecting");
++	if (!ldap_open()) {
++		log_warnx("warn: table-ldap: failed to connect");
++		return -1;
++	}
++	return ldap_run_query(type, key, dst, sz);
++}
++
++static int
++table_ldap_lookup(int service, struct dict *params, const char *key, char *dst, size_t sz)
++{
+ 	switch(service) {
+ 	case K_ALIAS:
+ 	case K_DOMAIN:
+@@ -336,15 +360,7 @@ table_ldap_lookup(int service, struct dict *params, co
+ 	case K_MAILADDR:
+ 	case K_MAILADDRMAP:
+ 	case K_NETADDR:
+-		if ((ret = ldap_run_query(service, key, dst, sz)) >= 0) {
+-			return ret;
+-		}
+-		log_debug("debug: table-ldap: reconnecting");
+-		if (!ldap_open()) {
+-			log_warnx("warn: table-ldap: failed to connect");
+-			return -1;
+-		}
+-		return ldap_run_query(service, key, dst, sz);
++		return ldap_run_query_reconnect(service, key, dst, sz);
+ 	default:
+ 		return -1;
+ 	}
+@@ -361,6 +377,8 @@ ldap_query(const char *filter, const char *key, char *
+ 	char				 filter__[MAX_LDAP_FILTERLEN];
+ 	char				 key__[MAX_LDAP_IDENTIFIER];
+ 
++	if (aldap == NULL)
++		return -1;
+ 	if (strlcpy(basedn__, basedn, sizeof basedn__) >= sizeof basedn__)
+ 		return -1;
+ 	if (strlcpy(filter__, filter, sizeof filter__) >= sizeof filter__)
+@@ -476,7 +494,8 @@ ldap_run_query(int type, const char *key, char *dst, s
  			ret = -1;
  		break;
  	case K_CREDENTIALS:
@@ -11,3 +96,42 @@ Index: table_ldap.c
  			ret = -1;
  		break;
  	case K_USERINFO:
+@@ -503,8 +522,6 @@ end:
+ static int
+ table_ldap_check(int service, struct dict *params, const char *key)
+ {
+-	int ret;
+-	
+ 	switch(service) {
+ 	case K_ALIAS:
+ 	case K_DOMAIN:
+@@ -513,15 +530,7 @@ table_ldap_check(int service, struct dict *params, con
+ 	case K_MAILADDR:
+ 	case K_MAILADDRMAP:
+ 	case K_NETADDR:
+-		if ((ret = ldap_run_query(service, key, NULL, 0)) >= 0) {
+-			return ret;
+-		}
+-		log_debug("debug: table-ldap: reconnecting");
+-		if (!ldap_open()) {
+-			log_warnx("warn: table-ldap: failed to connect");
+-			return -1;
+-		}
+-		return ldap_run_query(service, key, NULL, 0);
++		return ldap_run_query_reconnect(service, key, NULL, 0);
+ 	default:
+ 		return -1;
+ 	}
+@@ -534,6 +543,12 @@ main(int argc, char **argv)
+ 
+ 	log_init(1);
+ 	log_setverbose(~0);
++
++	/*
++	 * Writing to an LDAP connection the server has already closed
++	 * must fail with EPIPE so that we reconnect, not kill us.
++	 */
++	signal(SIGPIPE, SIG_IGN);
+ 
+ 	while ((ch = getopt(argc, argv, "")) != -1) {
+ 		switch (ch) {
