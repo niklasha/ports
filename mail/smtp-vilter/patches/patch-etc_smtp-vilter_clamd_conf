@@ -1,0 +1,14 @@
+Index: etc/smtp-vilter/clamd.conf
+--- etc/smtp-vilter/clamd.conf.orig
++++ etc/smtp-vilter/clamd.conf
+@@ -36,8 +36,8 @@ timeout=10
+ # Define a scanning type
+ #
+ # filesystem:  Do a file system scan
+-# socket:      Transfer mail message on a socket (if clamd is
+-#              remote, e.g.)
++# socket:      Transfer mail message on the clamd socket using INSTREAM
++#              (works with a remote clamd)
+ # fildes:      Pass the filedscriptor only to clamd
+ 
+ scantype=filesystem
