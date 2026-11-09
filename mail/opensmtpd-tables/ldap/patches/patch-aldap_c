@@ -1,0 +1,166 @@
+Index: aldap.c
+--- aldap.c.orig
++++ aldap.c
+@@ -22,6 +22,7 @@
+ #include <string.h>
+ #include <stdlib.h>
+ #include <unistd.h>
++#include <tls.h>
+ 
+ #include "aldap.h"
+ 
+@@ -55,13 +56,22 @@ void			 ldap_debug_elements(struct ber_element *);
+ int
+ aldap_close(struct aldap *al)
+ {
++	int ret = 0;
++
++	if (al->tls != NULL) {
++		/* best effort close_notify; the peer may already be gone */
++		tls_close(al->tls);
++		tls_free(al->tls);
++		al->tls = NULL;
++		al->ber.br_tls = NULL;
++	}
+ 	if (close(al->ber.fd) == -1)
+-		return (-1);
++		ret = -1;
+ 
+ 	ber_free(&al->ber);
+ 	free(al);
+ 
+-	return (0);
++	return (ret);
+ }
+ 
+ struct aldap *
+@@ -76,7 +86,74 @@ aldap_init(int fd)
+ 	return a;
+ }
+ 
++/*
++ * Start TLS on the (blocking) connection and complete the handshake,
++ * which verifies the server certificate and name according to cfg.
++ * On failure the connection must not be used any more: the caller is
++ * expected to aldap_close() it, there is no fallback to plain text.
++ */
+ int
++aldap_tls(struct aldap *ldap, struct tls_config *cfg, const char *name)
++{
++	int ret;
++
++	if ((ldap->tls = tls_client()) == NULL) {
++		ldap->err = ALDAP_ERR_OPERATION_FAILED;
++		return (-1);
++	}
++	if (tls_configure(ldap->tls, cfg) == -1) {
++		ldap->err = ALDAP_ERR_TLS_ERROR;
++		return (-1);
++	}
++	if (tls_connect_socket(ldap->tls, ldap->ber.fd, name) == -1) {
++		ldap->err = ALDAP_ERR_TLS_ERROR;
++		return (-1);
++	}
++	do {
++		ret = tls_handshake(ldap->tls);
++	} while (ret == TLS_WANT_POLLIN || ret == TLS_WANT_POLLOUT);
++	if (ret == -1) {
++		ldap->err = ALDAP_ERR_TLS_ERROR;
++		return (-1);
++	}
++
++	ldap->ber.br_tls = ldap->tls;
++	return (0);
++}
++
++int
++aldap_req_starttls(struct aldap *ldap)
++{
++	struct ber_element *root = NULL, *elm;
++	int error;
++
++	if ((root = ber_add_sequence(NULL)) == NULL)
++		goto fail;
++
++	elm = ber_printf_elements(root, "d{tst", ++ldap->msgid, BER_CLASS_APP,
++	    (unsigned long)LDAP_REQ_EXTENDED, LDAP_STARTTLS_OID,
++	    BER_CLASS_CONTEXT, (unsigned long)0);
++	if (elm == NULL)
++		goto fail;
++
++	LDAP_DEBUG("aldap_req_starttls", root);
++
++	error = ber_write_elements(&ldap->ber, root);
++	ber_free_elements(root);
++	root = NULL;
++	if (error == -1)
++		goto fail;
++
++	return (ldap->msgid);
++fail:
++	if (root != NULL)
++		ber_free_elements(root);
++
++	ldap->err = ALDAP_ERR_OPERATION_FAILED;
++	return (-1);
++}
++
++int
+ aldap_bind(struct aldap *ldap, char *binddn, char *bindcred)
+ {
+ 	struct ber_element *root = NULL, *elm;
+@@ -275,6 +352,7 @@ aldap_parse(struct aldap *ldap)
+ 	case LDAP_RES_MODRDN:
+ 	case LDAP_RES_COMPARE:
+ 	case LDAP_RES_SEARCH_RESULT:
++	case LDAP_RES_EXTENDED:
+ 		if (ber_scanf_elements(m->protocol_op, "{EeSeSe",
+ 		    &m->body.res.rescode, &m->dn, &m->body.res.diagmsg, &a) != 0)
+ 			goto parsefail;
+@@ -574,15 +652,23 @@ aldap_parse_url(const char *url, struct aldap_url *lu)
+ 	p = lu->buffer;
+ 
+ 	/* protocol */
+-	if (strncasecmp(LDAP_URL, p, strlen(LDAP_URL)) != 0)
++	if (strncasecmp(LDAP_URL, p, strlen(LDAP_URL)) == 0) {
++		lu->protocol = LDAP;
++		p += strlen(LDAP_URL);
++	} else if (strncasecmp(LDAPS_URL, p, strlen(LDAPS_URL)) == 0) {
++		lu->protocol = LDAPS;
++		p += strlen(LDAPS_URL);
++	} else if (strncasecmp(LDAPTLS_URL, p, strlen(LDAPTLS_URL)) == 0) {
++		lu->protocol = LDAPTLS;
++		p += strlen(LDAPTLS_URL);
++	} else
+ 		goto fail;
+-	lu->protocol = LDAP;
+-	p += strlen(LDAP_URL);
+ 
+ 	/* host and optional port */
+ 	if ((forward = strchr(p, '/')) != NULL)
+ 		*forward = '\0';
+ 	/* find the optional port */
++	lu->port = (lu->protocol == LDAPS) ? LDAPS_PORT : LDAP_PORT;
+ 	if ((forward2 = strchr(p, ':')) != NULL) {
+ 		*forward2 = '\0';
+ 		/* if a port is given */
+@@ -593,8 +679,6 @@ aldap_parse_url(const char *url, struct aldap_url *lu)
+ 				goto fail;
+ 			lu->port = forward2;
+ 		}
+-	} else {
+-		lu->port = LDAP_PORT;
+ 	}
+ 	/* fail if no host is given */
+ 	if (strlen(p) == 0)
+@@ -1299,6 +1383,10 @@ aldap_get_errno(struct aldap *a, const char **estr)
+ 		break;
+ 	case ALDAP_ERR_OPERATION_FAILED:
+ 		*estr = "operation failed";
++		break;
++	case ALDAP_ERR_TLS_ERROR:
++		if (a->tls == NULL || (*estr = tls_error(a->tls)) == NULL)
++			*estr = "tls error";
+ 		break;
+ 	default:
+ 		*estr = "unknown";

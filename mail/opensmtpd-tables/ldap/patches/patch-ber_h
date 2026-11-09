@@ -1,0 +1,15 @@
+Index: ber.h
+--- ber.h.orig
++++ ber.h
+@@ -32,8 +32,11 @@ struct ber_element {
+ #define be_numeric	be_union.bv_numeric
+ };
+ 
++struct tls;
++
+ struct ber {
+ 	int		 fd;
++	struct tls	*br_tls;	/* if set, all I/O on fd goes via TLS */
+ 	unsigned char	*br_wbuf;
+ 	unsigned char	*br_wptr;
+ 	unsigned char	*br_wend;

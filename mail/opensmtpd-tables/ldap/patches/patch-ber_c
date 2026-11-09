@@ -1,0 +1,106 @@
+Index: ber.c
+--- ber.c.orig
++++ ber.c
+@@ -29,6 +29,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <stdarg.h>
++#include <tls.h>
+ 
+ #include "ber.h"
+ 
+@@ -52,6 +53,8 @@ static ssize_t	ber_read_element(struct ber *ber, struc
+ static ssize_t	ber_readbuf(struct ber *b, void *buf, size_t nbytes);
+ static ssize_t	ber_getc(struct ber *b, unsigned char *c);
+ static ssize_t	ber_read(struct ber *ber, void *buf, size_t len);
++static ssize_t	ber_sock_read(struct ber *ber, void *buf, size_t len);
++static ssize_t	ber_sock_write(struct ber *ber, const void *buf, size_t len);
+ 
+ #ifdef DEBUG
+ #define DPRINTF(...)	printf(__VA_ARGS__)
+@@ -786,7 +789,7 @@ ber_write_elements(struct ber *ber, struct ber_element
+ 
+ 	/* XXX this should be moved to a different function */
+ 	if (ber->fd != -1)
+-		return write(ber->fd, ber->br_wbuf, len);
++		return ber_sock_write(ber, ber->br_wbuf, len);
+ 
+ 	return (len);
+ }
+@@ -1235,7 +1238,7 @@ ber_getc(struct ber *b, unsigned char *c)
+ 	if (b->fd == -1)
+ 		r = ber_readbuf(b, c, 1);
+ 	else
+-		r = read(b->fd, c, 1);
++		r = ber_sock_read(b, c, 1);
+ 	return r;
+ }
+ 
+@@ -1255,7 +1258,7 @@ ber_read(struct ber *ber, void *buf, size_t len)
+ 		if (ber->fd == -1)
+ 			r = ber_readbuf(ber, b, remain);
+ 		else
+-			r = read(ber->fd, b, remain);
++			r = ber_sock_read(ber, b, remain);
+ 		if (r == -1) {
+ 			if (errno == EINTR || errno == EAGAIN)
+ 				continue;
+@@ -1267,4 +1270,58 @@ ber_read(struct ber *ber, void *buf, size_t len)
+ 		remain -= r;
+ 	}
+ 	return (b - (unsigned char *)buf);
++}
++
++/*
++ * Read from the connection, through TLS once it has been set up.
++ * Returns like read(2): >0 bytes read, 0 on EOF, -1 on error.
++ * Once br_tls is set, the socket is never read in plain text again.
++ */
++static ssize_t
++ber_sock_read(struct ber *ber, void *buf, size_t len)
++{
++	ssize_t r;
++
++	if (ber->br_tls == NULL)
++		return read(ber->fd, buf, len);
++
++	do {
++		r = tls_read(ber->br_tls, buf, len);
++	} while (r == TLS_WANT_POLLIN || r == TLS_WANT_POLLOUT);
++	if (r == -1)
++		errno = EIO;
++	return r;
++}
++
++/*
++ * Write the whole buffer to the connection, through TLS once it has
++ * been set up.  Returns len on success, -1 on error.
++ */
++static ssize_t
++ber_sock_write(struct ber *ber, const void *buf, size_t len)
++{
++	const unsigned char *p = buf;
++	size_t done = 0;
++	ssize_t w;
++
++	while (done < len) {
++		if (ber->br_tls != NULL) {
++			w = tls_write(ber->br_tls, p + done, len - done);
++			if (w == TLS_WANT_POLLIN || w == TLS_WANT_POLLOUT)
++				continue;
++			if (w == -1) {
++				errno = EIO;
++				return -1;
++			}
++		} else {
++			w = write(ber->fd, p + done, len - done);
++			if (w == -1) {
++				if (errno == EINTR)
++					continue;
++				return -1;
++			}
++		}
++		done += w;
++	}
++	return len;
+ }

@@ -1,0 +1,34 @@
++-------------------------------------------------------------------------------
+| Running ${PKGSTEM} on OpenBSD
++-------------------------------------------------------------------------------
+
+Connecting to the LDAP server
+=============================
+
+The "url" key of the table configuration selects how table-ldap talks to
+the LDAP server:
+
+    url: ldap://host[:port]       plain text, default port 389
+    url: ldaps://host[:port]      LDAP over TLS, default port 636
+    url: ldap+tls://host[:port]   plain connection upgraded with StartTLS,
+                                  default port 389
+
+For ldaps:// and ldap+tls:// the server certificate is verified against the
+system CA bundle (/etc/ssl/cert.pem) and must be valid for the host name
+given in the URL, so use a name from the certificate, not an IP address.
+To verify against a different CA bundle (e.g. a private CA), add:
+
+    ca_file: /etc/ssl/my-ldap-ca.pem
+
+If the TLS handshake or the certificate check fails, the connection is not
+used; there is no fallback to plain text.  As with an unreachable server,
+the failure is logged, the lookup returns an error and the next lookup tries
+to connect again.  table-ldap also keeps running when the server is
+unreachable at startup.
+
+Example:
+
+    url: ldaps://ldap.example.com
+    username: cn=smtpd,ou=services,dc=example,dc=com
+    password: secret
+    basedn: ou=people,dc=example,dc=com

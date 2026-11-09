@@ -1,7 +1,7 @@
 Index: table_ldap.c
 --- table_ldap.c.orig
 +++ table_ldap.c
-@@ -24,6 +24,7 @@
+@@ -24,9 +24,11 @@
  #include <netdb.h>
  
  #include <ctype.h>
@@ -9,7 +9,171 @@ Index: table_ldap.c
  #include <stdlib.h>
  #include <stdio.h>
  #include <string.h>
-@@ -279,6 +280,7 @@ ldap_open(void)
++#include <tls.h>
+ #include <unistd.h>
+ 
+ #include "aldap.h"
+@@ -68,7 +70,7 @@ struct query {
+ 
+ static int ldap_run_query(int type, const char *, char *, size_t);
+ 
+-static char *config, *url, *username, *password, *basedn;
++static char *config, *url, *username, *password, *basedn, *ca_file;
+ 
+ static struct aldap *aldap;
+ static struct query queries[LDAP_MAX];
+@@ -85,13 +87,82 @@ table_ldap_fetch(int service, struct dict *params, cha
+ 	return -1;
+ }
+ 
++/*
++ * Ask the server to switch the connection to TLS (RFC 4511 4.14).
++ */
++static int
++ldap_starttls(struct aldap *ldap)
++{
++	struct aldap_message	*amsg;
++	int			 ok;
++
++	if (aldap_req_starttls(ldap) == -1) {
++		log_warnx("warn: table-ldap: failed to send StartTLS request");
++		return 0;
++	}
++	if ((amsg = aldap_parse(ldap)) == NULL) {
++		log_warnx("warn: table-ldap: no StartTLS response");
++		return 0;
++	}
++	ok = amsg->message_type == LDAP_RES_EXTENDED &&
++	    aldap_get_resultcode(amsg) == LDAP_SUCCESS;
++	if (!ok)
++		log_warnx("warn: table-ldap: server refused StartTLS, "
++		    "result #%d", aldap_get_resultcode(amsg));
++	aldap_freemsg(amsg);
++	return ok;
++}
++
++/*
++ * Set up TLS on a freshly connected socket: ldaps:// starts with the
++ * handshake, ldap+tls:// does StartTLS first.  The server certificate
++ * is verified against the system CA bundle (or ca_file) and must match
++ * the host name from the URL.  Any failure fails the whole connection;
++ * we never fall back to plain text.
++ */
++static int
++ldap_start_tls(struct aldap *ldap, const struct aldap_url *lu)
++{
++	struct tls_config	*tls_config;
++	const char		*errstr;
++	int			 ret = 0;
++
++	if (lu->protocol == LDAPTLS && !ldap_starttls(ldap))
++		return 0;
++
++	if ((tls_config = tls_config_new()) == NULL) {
++		log_warnx("warn: table-ldap: tls_config_new failed");
++		return 0;
++	}
++	if (ca_file != NULL &&
++	    tls_config_set_ca_file(tls_config, ca_file) == -1) {
++		log_warnx("warn: table-ldap: can't load ca_file %s: %s",
++		    ca_file, tls_config_error(tls_config));
++		goto out;
++	}
++	if (aldap_tls(ldap, tls_config, lu->host) == -1) {
++		aldap_get_errno(ldap, &errstr);
++		log_warnx("warn: table-ldap: TLS with %s:%s failed: %s",
++		    lu->host, lu->port, errstr);
++		goto out;
++	}
++	log_debug("debug: table-ldap: TLS %s with %s:%s established",
++	    tls_conn_version(ldap->tls), lu->host, lu->port);
++	ret = 1;
++out:
++	tls_config_free(tls_config);
++	return ret;
++}
++
+ static struct aldap *
+ ldap_connect(const char *addr)
+ {
+ 	struct aldap_url lu;
++	struct aldap	*ldap = NULL;
+ 	struct addrinfo	 hints, *res0, *res;
+ 	int		 error, fd = -1;
+ 
++	memset(&lu, 0, sizeof(lu));
+ 	if (aldap_parse_url(addr, &lu) != 1) {
+ 		log_warnx("warn: ldap_parse_url fail");
+ 		return NULL;
+@@ -102,12 +173,15 @@ ldap_connect(const char *addr)
+ 	hints.ai_socktype = SOCK_STREAM;
+ 	hints.ai_flags = AI_NUMERICSERV;
+ 	error = getaddrinfo(lu.host, lu.port, &hints, &res0);
+-	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME)
+-		return NULL;
++	if (error == EAI_AGAIN || error == EAI_NODATA || error == EAI_NONAME) {
++		log_warnx("warn: table-ldap: could not resolve %s: %s",
++		    lu.host, gai_strerror(error));
++		goto out;
++	}
+ 	if (error) {
+ 		log_warnx("warn: could not parse \"%s:%s\": %s", lu.host,
+ 		    lu.port, gai_strerror(error));
+-		return NULL;
++		goto out;
+ 	}
+ 
+ 	for (res = res0; res; res = res->ai_next) {
+@@ -115,17 +189,34 @@ ldap_connect(const char *addr)
+ 		if (fd == -1)
+ 			continue;
+ 
+-		if (connect(fd, res->ai_addr, res->ai_addrlen) == 0) {
+-			aldap_free_url(&lu);
+-			return aldap_init(fd);
+-		}
++		if (connect(fd, res->ai_addr, res->ai_addrlen) == 0)
++			break;
+ 
+ 		close(fd);
+ 		fd = -1;
+ 	}
++	freeaddrinfo(res0);
+ 
++	if (fd == -1) {
++		log_warnx("warn: table-ldap: could not connect to %s:%s",
++		    lu.host, lu.port);
++		goto out;
++	}
++	if ((ldap = aldap_init(fd)) == NULL) {
++		log_warn("warn: table-ldap: aldap_init");
++		close(fd);
++		goto out;
++	}
++
++	if ((lu.protocol == LDAPS || lu.protocol == LDAPTLS) &&
++	    !ldap_start_tls(ldap, &lu)) {
++		aldap_close(ldap);
++		ldap = NULL;
++	}
++
++out:
+ 	aldap_free_url(&lu);
+-	return NULL;
++	return ldap;
+ }
+ 
+ static int
+@@ -228,6 +319,8 @@ ldap_config(void)
+ 			read_value(&password, key, value);
+ 		else if (!strcmp(key, "basedn"))
+ 			read_value(&basedn, key, value);
++		else if (!strcmp(key, "ca_file"))
++			read_value(&ca_file, key, value);
+ 		else if (!strcmp(key, "alias_filter"))
+ 			read_value(&queries[LDAP_ALIAS].filter, key, value);
+ 		else if (!strcmp(key, "alias_attributes")) {
+@@ -279,6 +372,7 @@ ldap_open(void)
  
  	if (aldap) {
  		aldap_close(aldap);
@@ -17,7 +181,7 @@ Index: table_ldap.c
  		log_info("info: table-ldap: closed previous connection");
  	}
  
-@@ -316,18 +318,40 @@ ldap_open(void)
+@@ -316,18 +410,40 @@ ldap_open(void)
  	return 1;
  
  err:
@@ -60,7 +224,7 @@ Index: table_ldap.c
  	switch(service) {
  	case K_ALIAS:
  	case K_DOMAIN:
-@@ -336,15 +360,7 @@ table_ldap_lookup(int service, struct dict *params, co
+@@ -336,15 +452,7 @@ table_ldap_lookup(int service, struct dict *params, co
  	case K_MAILADDR:
  	case K_MAILADDRMAP:
  	case K_NETADDR:
@@ -77,7 +241,7 @@ Index: table_ldap.c
  	default:
  		return -1;
  	}
-@@ -361,6 +377,8 @@ ldap_query(const char *filter, const char *key, char *
+@@ -361,6 +469,8 @@ ldap_query(const char *filter, const char *key, char *
  	char				 filter__[MAX_LDAP_FILTERLEN];
  	char				 key__[MAX_LDAP_IDENTIFIER];
  
@@ -86,7 +250,7 @@ Index: table_ldap.c
  	if (strlcpy(basedn__, basedn, sizeof basedn__) >= sizeof basedn__)
  		return -1;
  	if (strlcpy(filter__, filter, sizeof filter__) >= sizeof filter__)
-@@ -476,7 +494,8 @@ ldap_run_query(int type, const char *key, char *dst, s
+@@ -476,7 +586,8 @@ ldap_run_query(int type, const char *key, char *dst, s
  			ret = -1;
  		break;
  	case K_CREDENTIALS:
@@ -96,7 +260,7 @@ Index: table_ldap.c
  			ret = -1;
  		break;
  	case K_USERINFO:
-@@ -503,8 +522,6 @@ end:
+@@ -503,8 +614,6 @@ end:
  static int
  table_ldap_check(int service, struct dict *params, const char *key)
  {
@@ -105,7 +269,7 @@ Index: table_ldap.c
  	switch(service) {
  	case K_ALIAS:
  	case K_DOMAIN:
-@@ -513,15 +530,7 @@ table_ldap_check(int service, struct dict *params, con
+@@ -513,15 +622,7 @@ table_ldap_check(int service, struct dict *params, con
  	case K_MAILADDR:
  	case K_MAILADDRMAP:
  	case K_NETADDR:
@@ -122,16 +286,39 @@ Index: table_ldap.c
  	default:
  		return -1;
  	}
-@@ -534,6 +543,12 @@ main(int argc, char **argv)
- 
+@@ -535,6 +636,12 @@ main(int argc, char **argv)
  	log_init(1);
  	log_setverbose(~0);
-+
+ 
 +	/*
 +	 * Writing to an LDAP connection the server has already closed
 +	 * must fail with EPIPE so that we reconnect, not kill us.
 +	 */
 +	signal(SIGPIPE, SIG_IGN);
- 
++
  	while ((ch = getopt(argc, argv, "")) != -1) {
  		switch (ch) {
+ 		default:
+@@ -554,9 +661,19 @@ main(int argc, char **argv)
+ 		fatalx("could not parse config");
+ 	log_debug("debug: done reading config");
+ 
+-	if (!ldap_open())
+-		fatalx("failed to connect");
+-	log_debug("debug: connected");
++	if (url == NULL)
++		fatalx("no url in config");
++
++	/*
++	 * If the server is unreachable or the TLS handshake fails right
++	 * now, do not exit (which would take smtpd down with us): every
++	 * request retries the connection until the server is back.
++	 */
++	if (ldap_open())
++		log_debug("debug: connected");
++	else
++		log_warnx("warn: table-ldap: initial connect failed, "
++		    "will retry on the next request");
+ 
+ 	table_api_on_update(table_ldap_update);
+ 	table_api_on_check(table_ldap_check);
