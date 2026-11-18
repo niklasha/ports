@@ -1,4 +1,4 @@
-NC_VERSION=	34.0.5
+NC_VERSION=	34.0.6
 PORTROACH=
 
 .include <bsd.port.mk>
